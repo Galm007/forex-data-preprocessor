@@ -1,3 +1,4 @@
+import sys
 import csv
 from histdata import HistData
 from normalize import normalize_data
@@ -103,11 +104,11 @@ def preprocess(data: HistData) -> None:
 if __name__ == "__main__":
     data = HistData("EURUSD")
 
-    with open("EURUSD_D1.csv", "r") as file:
+    with open(sys.argv[1], "r") as file:
         data.parse_histdata_file(file, "D1")
-    with open("EURUSD_H4.csv", "r") as file:
+    with open(sys.argv[2], "r") as file:
         data.parse_histdata_file(file, "H4")
-    with open("EURUSD_H1.csv", "r") as file:
+    with open(sys.argv[3], "r") as file:
         data.parse_histdata_file(file, "H1")
 
     preprocess(data)
