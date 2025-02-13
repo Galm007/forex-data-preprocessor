@@ -1,110 +1,118 @@
-from histdata import HistData
+import pandas as pd
+import numpy as np
 import math
 
-def require_data(data: HistData, icustom: str) -> None:
-    if icustom not in data.icustom:
-        raise Exception(f"iCustom \"{icustom}\" is required but has not been initialized!")
+# TODO: Speed up stddev algorithm
 
-def sma(data: HistData, timeframe: str, period: int, shift: int) -> float:
-    name = f"{timeframe} SMA({period})"
-    if name in data.icustom:
-        return data.icustom[name][shift]
-    
+
+def sma(data: pd.DataFrame, period: int, shift: int):
+    name = f"SMA({period})"
+    if name in data:
+        return data[name].iloc[shift]
+
     sum = 0
     for i in range(period):
-        sum += data.close[timeframe][shift - i]
+        sum += data["CLOSE"].iloc[shift - i]
     return sum / period
 
-def sma_filldata(data: HistData, timeframe: str, period: int) -> None:
-    arr = [-1.0 for _ in range(period - 1)]
+
+def sma_filldata(data: pd.DataFrame, period: int) -> None:
+    arr = [np.nan for _ in range(period - 1)]
     sum = 0
 
     for i in range(period):
-        sum += data.close[timeframe][i]
+        sum += data["CLOSE"].iloc[i]
     arr.append(sum / period)
 
-    for i in range(data.bars(timeframe) - period):
-        sum += data.close[timeframe][period + i]
-        sum -= data.close[timeframe][i]
+    for i in range(len(data) - period):
+        sum += data["CLOSE"].iloc[period + i]
+        sum -= data["CLOSE"].iloc[i]
         arr.append(sum / period)
 
-    data.icustom[f"{timeframe} SMA({period})"] = arr
-    data.update_valid_length(timeframe, data.bars(timeframe) - period + 1)
+    data[f"SMA({period})"] = arr
 
-def ema_filldata(data: HistData, timeframe: str, period: int) -> None:
-    arr = [-1.0 for _ in range(period - 1)]
 
-    prev = sma(data, timeframe, period, period - 1)
+def ema_filldata(data: pd.DataFrame, period: int) -> None:
+    arr = [np.nan for _ in range(period - 1)]
+
+    prev = sma(data, period, period - 1)
     arr.append(prev)
 
-    for i in range(data.bars(timeframe) - period):
+    for i in range(len(data) - period):
         k = 2 / (period + 1)
-        ema = data.close[timeframe][period + i] * k + prev * (1 - k)
+        ema = data["CLOSE"].iloc[period + i] * k + prev * (1 - k)
         arr.append(ema)
-
         prev = ema
 
-    data.icustom[f"{timeframe} EMA({period})"] = arr
-    data.update_valid_length(timeframe, data.bars(timeframe) - period + 1)
+    data[f"EMA({period})"] = arr
 
-def macd_filldata(data: HistData, timeframe: str, fast_ema_period: int, slow_ema_period: int) -> None:
-    fast_ema_name = f"{timeframe} EMA({fast_ema_period})"
-    slow_ema_name = f"{timeframe} EMA({slow_ema_period})"
 
-    ema_filldata(data, timeframe, fast_ema_period)
-    ema_filldata(data, timeframe, slow_ema_period)
+def macd_filldata(
+    data: pd.DataFrame, fast_ema_period: int, slow_ema_period: int
+) -> None:
+    fast_ema_name = f"EMA({fast_ema_period})"
+    slow_ema_name = f"EMA({slow_ema_period})"
 
-    arr = [-1.0 for _ in range(slow_ema_period - 1)]
+    ema_filldata(data, fast_ema_period)
+    ema_filldata(data, slow_ema_period)
 
-    for i in range(data.bars(timeframe) - slow_ema_period + 1):
-        fast_ema = data.icustom[fast_ema_name][slow_ema_period + i - 1]
-        slow_ema = data.icustom[slow_ema_name][slow_ema_period + i - 1]
+    arr = [np.nan for _ in range(slow_ema_period - 1)]
+
+    for i in range(len(data) - slow_ema_period + 1):
+        fast_ema = data[fast_ema_name].iloc[slow_ema_period - 1 + i]
+        slow_ema = data[slow_ema_name].iloc[slow_ema_period - 1 + i]
         arr.append(fast_ema - slow_ema)
 
-    data.icustom[f"{timeframe} MACD({fast_ema_period}, {slow_ema_period})"] = arr
-    data.update_valid_length(timeframe, data.bars(timeframe) - slow_ema_period + 1)
+    data.drop(columns=[fast_ema_name, slow_ema_name])
+    data[f"MACD({fast_ema_period}, {slow_ema_period})"] = arr
 
-def macd_signal_filldata(data: HistData, timeframe: str, fast_ema_period: int, slow_ema_period: int, signal_period: int) -> None:
-    macd_name = f"{timeframe} MACD({fast_ema_period}, {slow_ema_period})"
-    macd_filldata(data, timeframe, fast_ema_period, slow_ema_period)
 
-    arr = [-1.0 for _ in range(slow_ema_period + signal_period - 1)]
+def macd_signal_filldata(
+    data: pd.DataFrame, fast_ema_period: int, slow_ema_period: int, signal_period: int
+) -> None:
+    macd_name = f"MACD({fast_ema_period}, {slow_ema_period})"
+    macd_filldata(data, fast_ema_period, slow_ema_period)
+
+    arr = [np.nan for _ in range(slow_ema_period + signal_period - 1)]
     sum = 0
 
     for i in range(signal_period):
-        sum += data.icustom[macd_name][slow_ema_period + i]
+        sum += data[macd_name].iloc[slow_ema_period + i]
     arr.append(sum / signal_period)
 
-    for i in range(data.bars(timeframe) - slow_ema_period - signal_period):
-        sum += data.icustom[macd_name][slow_ema_period + signal_period + i]
-        sum -= data.icustom[macd_name][slow_ema_period + i]
+    for i in range(len(data) - slow_ema_period - signal_period):
+        sum += data[macd_name].iloc[slow_ema_period + signal_period + i]
+        sum -= data[macd_name].iloc[slow_ema_period + i]
         arr.append(sum / signal_period)
 
-    data.icustom[f"{timeframe} MACD_SIGNAL({fast_ema_period}, {slow_ema_period}, {signal_period})"] = arr
-    data.update_valid_length(timeframe, data.bars(timeframe) - slow_ema_period - signal_period + 2)
+    data.drop(columns=[macd_name])
+    data[f"MACD_SIGNAL({fast_ema_period}, {slow_ema_period}, {signal_period})"] = arr
 
-def stddev_filldata(data: HistData, timeframe: str, period: int) -> None:
-    sma_name = f"{timeframe} SMA({period})"
 
-    sma_filldata(data, timeframe, period)
+def stddev_filldata(data: pd.DataFrame, period: int) -> None:
+    sma_name = f"SMA({period})"
+    sma_filldata(data, period)
 
-    arr = [-1.0 for _ in range(period - 1)]
+    arr = [np.nan for _ in range(period - 1)]
 
-    for i in range(data.bars(timeframe) - period + 1):
+    for i in range(len(data) - period + 1):
         variance_sum = 0
-
         for j in range(period - 1):
-            variance_sum += (data.close[timeframe][period - 1 + i - j] - data.icustom[sma_name][period - 1 + i]) ** 2
-
+            variance_sum += (
+                data["CLOSE"].iloc[period - 1 + i - j]
+                - data[sma_name].iloc[period - 1 + i]
+            ) ** 2
         arr.append(math.sqrt(variance_sum / (period - 1)))
 
-    data.icustom[f"{timeframe} STDDEV({period})"] = arr
-    data.update_valid_length(timeframe, data.bars(timeframe) - period + 1)
+    data.drop(columns=[sma_name])
+    data[f"STDDEV({period})"] = arr
 
-def derivative_filldata(data: HistData, icustom_name: str, buffer: list[float]):
-    arr = [-1.0]
 
-    for i in range(len(buffer) - 1):
-        arr.append(buffer[i + 1] - buffer[i])
+def derivative_filldata(data: pd.DataFrame, column_name: str):
+    column = data[column_name]
+    arr = [np.nan]
 
-    data.icustom[f"{icustom_name} DERIVATIVE"] = arr
+    for i in range(len(column) - 1):
+        arr.append(column.iloc[i + 1] - column.iloc[i])
+
+    data[f"{column_name} DERIVATIVE"] = arr
